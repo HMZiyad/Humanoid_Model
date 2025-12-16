@@ -32,12 +32,24 @@ export const useLipSync = () => {
     const [isSpeaking, setIsSpeaking] = useState(false);
     const [currentViseme, setCurrentViseme] = useState<Viseme>('viseme_sil');
     const [audioSource, setAudioSource] = useState<SpeechSynthesisUtterance | null>(null);
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+    const PUNCTUATION_DELAYS: { [key: string]: number } = {
+        ',': 400,
+        '.': 600,
+        '!': 600,
+        '?': 600,
+        ';': 400,
+        ':': 400,
+        '-': 300,
+    };
 
     const speak = useCallback((text: string) => {
         if (typeof window === 'undefined' || !window.speechSynthesis) return;
 
-        // Cancel current speech
+        // Cancel current speech & timer
         window.speechSynthesis.cancel();
+        if (timerRef.current) clearTimeout(timerRef.current);
 
         const utterance = new SpeechSynthesisUtterance(text);
         // Select a female voice if available
@@ -48,49 +60,59 @@ export const useLipSync = () => {
         utterance.rate = 1.0;
         utterance.pitch = 1.2;
 
-        utterance.onstart = () => setIsSpeaking(true);
-        utterance.onend = () => {
-            setIsSpeaking(false);
-            setCurrentViseme('viseme_sil');
-        };
-
-        // Simple Lip Sync Logic:
+        // Logic variables
         let charIndex = 0;
-        const intervalTime = 60; // ms per char (approx speed)
-        let syncInterval: NodeJS.Timeout;
+        const defaultCharTime = 60; // ms per char
+
+        const playNextChar = () => {
+            if (charIndex >= text.length) {
+                // End of text, but let onend handle the state flip
+                setCurrentViseme('viseme_sil');
+                return;
+            }
+
+            const char = text[charIndex];
+            const lowerChar = char.toLowerCase();
+            const isPunctuation = PUNCTUATION_DELAYS[char] !== undefined;
+
+            // Determine delay
+            let delay = defaultCharTime;
+
+            if (isPunctuation) {
+                delay = PUNCTUATION_DELAYS[char];
+                setCurrentViseme('viseme_sil'); // Pause mouth on punctuation
+            } else if (char === ' ') {
+                setCurrentViseme('viseme_sil');
+            } else {
+                const viseme = VISEME_MAP[lowerChar] || VISEME_MAP['default'];
+                setCurrentViseme(viseme);
+            }
+
+            charIndex++;
+            timerRef.current = setTimeout(playNextChar, delay);
+        };
 
         utterance.onstart = () => {
             setIsSpeaking(true);
-            const words = text.split(' ');
-
-            syncInterval = setInterval(() => {
-                if (charIndex >= text.length) {
-                    clearInterval(syncInterval);
-                    setCurrentViseme('viseme_sil');
-                    return;
-                }
-
-                const char = text[charIndex].toLowerCase();
-                const viseme = VISEME_MAP[char] || VISEME_MAP['default'];
-
-                if (char === ' ') {
-                    setCurrentViseme('viseme_sil');
-                } else {
-                    setCurrentViseme(viseme);
-                }
-
-                charIndex++;
-            }, intervalTime);
+            playNextChar();
         };
 
         utterance.onend = () => {
             setIsSpeaking(false);
-            clearInterval(syncInterval);
             setCurrentViseme('viseme_sil');
-        }
+            if (timerRef.current) clearTimeout(timerRef.current);
+        };
 
         window.speechSynthesis.speak(utterance);
         setAudioSource(utterance);
+    }, []);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+            window.speechSynthesis.cancel();
+        };
     }, []);
 
     return { speak, isSpeaking, currentViseme };
