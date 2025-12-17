@@ -55,7 +55,7 @@ export function Avatar({ currentViseme }: AvatarProps) {
             });
 
             // Idle Head Bob
-            scene.rotation.y = Math.PI + Math.sin(state.clock.elapsedTime * 0.5) * 0.05;
+            scene.rotation.y = Math.sin(state.clock.elapsedTime * 0.5) * 0.05;
         }
     });
 
